@@ -42,7 +42,7 @@ on:
         required: true
         default: 'X6885'
       MAKEFILE_NAME:
-        description: 'MAKEFILE_NAME (lunch: <MAKEFILE_NAME>-ap2a-eng)'
+        description: 'MAKEFILE_NAME'
         required: true
         default: 'fox_X6885'
       BUILD_TARGET:
