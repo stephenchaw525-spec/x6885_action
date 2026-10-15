@@ -18,7 +18,7 @@ on:
       DEVICE_TREE_BRANCH:
         description: 'DEVICE_TREE_BRANCH'
         required: true
-        default: 'test'
+        default: 'main'
       DEVICE_PATH:
         description: 'DEVICE_PATH'
         required: true
@@ -160,6 +160,15 @@ jobs:
         ccache -z
         echo "Cache hit: ${{ steps.ccache.outputs.cache-hit }}"
         ccache -s
+
+    - name: Fix update_engine vs libsnapshot mismatch
+      run: |
+        cd ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
+        f=system/update_engine/aosp/dynamic_partition_control_android.cc
+        if ! grep -rq 'UpdateUsesSnapuserd' system/core/fs_mgr/libsnapshot/include; then
+          sed -i 's/GetSnapshotManager()->UpdateUsesSnapuserd()/false/' "$f"
+        fi
+        grep -n 'UpdateUsesSnapuserd' "$f" || true
 
     - name: Building recovery
       id: build
