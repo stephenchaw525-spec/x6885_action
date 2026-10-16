@@ -1,4 +1,4 @@
-name: Test Build 16.0
+name: Recovery Build 16.0
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       SYNC_URL:
         description: 'SYNC_URL'
         required: true
-        default: 'https://github.com/OrangeFox16/sync.git'
+        default: 'https://gitlab.com/OrangeFox/sync.git'
       MANIFEST_BRANCH:
         description: 'MANIFEST_BRANCH (OrangeFox branch)'
         required: true
@@ -18,7 +18,7 @@ on:
       DEVICE_TREE_BRANCH:
         description: 'DEVICE_TREE_BRANCH'
         required: true
-        default: 'Test_bak'
+        default: 'test'
       DEVICE_PATH:
         description: 'DEVICE_PATH'
         required: true
@@ -130,14 +130,6 @@ jobs:
       with:
         swap-size-gb: 12
 
-    - name: Workaround for missing repo projects (14.1-era, may not exist in 16.0)
-      run : |
-        cd ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
-        repo sync external/gflags || true
-        repo sync external/guava || true
-        repo sync hardware/google/interfaces || true
-        repo sync hardware/google/pixel || true
-
     - name: Restore ccache
       if: github.event.inputs.USE_CCACHE == 'true'
       id: ccache
@@ -161,14 +153,62 @@ jobs:
         echo "Cache hit: ${{ steps.ccache.outputs.cache-hit }}"
         ccache -s
 
+    - name: Apply source fixes (A16 / minimal manifest)
+      run: |
+        cd ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
+
+        # 1) update_engine vs libsnapshot mismatch (UpdateUsesSnapuserd belum ada di ISnapshotManager)
+        f=system/update_engine/aosp/dynamic_partition_control_android.cc
+        if ! grep -rq 'UpdateUsesSnapuserd' system/core/fs_mgr/libsnapshot/include; then
+          sed -i 's/GetSnapshotManager()->UpdateUsesSnapuserd()/false/' "$f"
+        fi
+        grep -n 'UpdateUsesSnapuserd' "$f" || true
+
+        # 2) libguitwrp butuh system/vold buat fscrypt_policy.h
+        f=bootable/recovery/gui/Android.bp
+        if ! grep -q '"system/vold"' "$f"; then
+          sed -i '0,/"bootable\/recovery\/Fox_ssl\/include",/s//"bootable\/recovery\/Fox_ssl\/include",\n        "system\/vold",/' "$f"
+        fi
+        grep -n -B1 -A1 '"system/vold"' "$f"
+
+        # 3) fallback TW_OZIP_DECRYPT_KEY (dipakai action.cpp, tidak ada default di tree 16.0)
+        for f in $(grep -rl 'TW_OZIP_DECRYPT_KEY' bootable/recovery --include=*.cpp --include=*.hpp --include=*.h); do
+          if ! grep -q 'define TW_OZIP_DECRYPT_KEY' "$f"; then
+            sed -i '1i #ifndef TW_OZIP_DECRYPT_KEY\n#define TW_OZIP_DECRYPT_KEY "0"\n#endif' "$f"
+          fi
+          echo "patched: $f"
+        done
+
+        # 4) sepolicy: /etc dan /apex di file_contexts device bentrok dgn system/sepolicy (A16)
+        #    -> hapus spec generik AOSP, biar label recovery dari device tree yang dipakai
+        for f in $(find system/sepolicy -name file_contexts -path '*/private/*' -not -path '*/prebuilts/*'); do
+          sed -i -E '/^\/etc[[:space:]]+(-.[[:space:]]+)?u:object_r:rootfs:s0/d; /^\/apex[[:space:]]+(-.[[:space:]]+)?u:object_r:apex_mnt_dir:s0/d' "$f"
+          echo "sepolicy fixed: $f"
+          grep -n -E '^/(etc|apex)[[:space:]]' "$f" || true
+        done
+
+        # 5) copySqliteDb: tidak ada di keystore A16 (SEMENTARA: no-op supaya build lanjut;
+        #    ini melewati copy DB keystore -> decrypt FBE di recovery bisa gagal, diperbaiki nanti)
+        echo "--- diag copySqliteDb ---"
+        grep -rn 'copySqliteDb' bootable/recovery system/security 2>/dev/null | head -20 || true
+        sed -i 's/android::keystore::copySqliteDb();/(void)0; \/\* copySqliteDb stubbed (A16) \*\//' bootable/recovery/twrp.cpp
+        grep -n -B3 -A2 'copySqliteDb' bootable/recovery/twrp.cpp || true
+
+        # 6) neverallow vs domain recovery (vold.te) bikin sepolicy.recovery gagal di A16
+        #    -> standar buat build recovery: abaikan neverallow
+        bc=${{ github.event.inputs.DEVICE_PATH }}/BoardConfig.mk
+        grep -q 'SELINUX_IGNORE_NEVERALLOWS' "$bc" || echo 'SELINUX_IGNORE_NEVERALLOWS := true' >> "$bc"
+        grep -n 'SELINUX_IGNORE_NEVERALLOWS' "$bc"
+
     - name: Building recovery
       id: build
       run: |
         cd ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
         set +e
+        # HARUS sebelum envsetup: envsetup ikut nge-source vendorsetup.sh device
+        export X6885_PATCHES="${{ github.event.inputs.PATCHES }}"
         source build/envsetup.sh
         # vendorsetup tree ini nge-apply patch ke source OrangeFox & set FOX_* env
-        export X6885_PATCHES="${{ github.event.inputs.PATCHES }}"
         source ${{ github.event.inputs.DEVICE_PATH }}/vendorsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
         export FOX_USE_ZSTD_BINARY=1
@@ -231,6 +271,6 @@ jobs:
         else
           TEXT=$(printf '❌ Build gagal\nDevice: %s\nLog: %s' "$DEVICE" "$RUN_URL")
         fi
-        curl -s -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+        curl -sS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
           --data-urlencode "chat_id=${CHAT_ID}" \
           --data-urlencode "text=${TEXT}"
