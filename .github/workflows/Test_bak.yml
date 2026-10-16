@@ -200,6 +200,21 @@ jobs:
         grep -q 'SELINUX_IGNORE_NEVERALLOWS' "$bc" || echo 'SELINUX_IGNORE_NEVERALLOWS := true' >> "$bc"
         grep -n 'SELINUX_IGNORE_NEVERALLOWS' "$bc"
 
+    - name: Dump vendor/recovery (buat cek patch)
+      run: |
+        cd ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/vendor/recovery
+        ls -la
+        grep -n "magiskboot unpack" OrangeFox_A16.sh || true
+
+    - name: Upload OrangeFox_A16.sh
+      uses: actions/upload-artifact@v4
+      with:
+        name: orangefox-vendor-recovery
+        path: |
+          ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/vendor/recovery/*.sh
+          ${{ steps.pwd.outputs.workspace-folder }}/fox_${{ github.event.inputs.MANIFEST_BRANCH }}/vendor/recovery/FoxExtras/sbin/foxstart.sh
+        if-no-files-found: warn
+
     - name: Building recovery
       id: build
       run: |
