@@ -32,7 +32,9 @@ content = content.replace('printf("Begin Operation failed\\n");', 'printf("Begin
 old_decl = "GKResponse gkResponse;"
 new_decl = """GKResponse gkResponse;
 			HardwareAuthToken authToken;"""
-if old_decl in content and "HardwareAuthToken authToken;" not in content:
+# cek deklarasi yang KITA sisipkan (bukan sekadar "HardwareAuthToken authToken;",
+# karena upstream sudah punya deklarasi itu di dalam blok HIDL yang nanti diganti step 6)
+if old_decl in content and (old_decl + "\n\t\t\tHardwareAuthToken authToken;") not in content:
     content = content.replace(old_decl, new_decl, 1)
     print("[X6885-Fix] Patched authToken declaration")
 
