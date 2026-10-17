@@ -87,7 +87,8 @@ replacement_dispatch = """\
 
 target_pattern = re.compile(r'if\s*\(\s*gkResponse\.response_code\(\)\s*==\s*GKResponseCode::OK\s*\)\s*\{[\s\S]*?auto\s+binder_result\s*=\s*service->addAuthToken\s*\(\s*authToken\s*\);\s*\}\s*\}')
 if target_pattern.search(content):
-    content = target_pattern.sub(replacement_dispatch, content, count=1)
+    # lambda => re.sub tidak memproses escape (\n tetap literal di source C++)
+    content = target_pattern.sub(lambda m: replacement_dispatch, content, count=1)
     print("[X6885-Fix] Patched auth token delivery to IKeystoreAuthorization via regex")
 elif "Gatekeeper auth token accepted by keystore" in content:
     print("[X6885-Fix] Auth token delivery already present")
